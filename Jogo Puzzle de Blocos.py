@@ -1,10 +1,11 @@
 import pygame
 import random
 import sys
+import json
 
 # Configurações básicas
 pygame.init()
-WIDTH, HEIGHT = 600, 800
+WIDTH, HEIGHT = 600, 680
 BLOCK_SIZE = 40
 GRID_WIDTH, GRID_HEIGHT = WIDTH // BLOCK_SIZE, HEIGHT // BLOCK_SIZE - 2
 FONT = pygame.font.SysFont(None, 36)
@@ -17,8 +18,27 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Puzzle de Blocos")
 clock = pygame.time.Clock()
 score = 0
-high_score = 0
 game_over = False
+high_score = 0
+
+# Caminho do arquivo para armazenar o high score
+high_score_file = "high_score.json"
+
+# Função para carregar o highscore do arquivo JSON
+def load_high_score():
+    global high_score
+    try:
+        with open(high_score_file, "r") as f:
+            data = json.load(f)
+            high_score = data.get("high_score", 0)
+    except (FileNotFoundError, json.JSONDecodeError):
+        high_score = 0
+
+# Função para salvar o highscore no arquivo JSON
+def save_high_score():
+    global high_score
+    with open(high_score_file, "w") as f:
+        json.dump({"high_score": high_score}, f)
 
 # Função para gerar uma grade de blocos com cores aleatórias
 def create_grid():
@@ -95,12 +115,14 @@ def main():
     grid = create_grid()
     dragging = False
     selected_block = None
+    load_high_score()  # Carrega o high score ao iniciar o jogo
 
     while True:
         screen.fill((255, 255, 255))
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                save_high_score()  # Salva o high score ao sair do jogo
                 pygame.quit()
                 sys.exit()
             elif event.type == pygame.MOUSEBUTTONDOWN and not game_over:
