@@ -1,183 +1,190 @@
 import pygame
 import random
 import sys
+import time
 import json
+import os
 
-# Configurações básicas
+# Inicializar o pygame
 pygame.init()
-WIDTH, HEIGHT = 600, 680
-BLOCK_SIZE = 40
-GRID_WIDTH, GRID_HEIGHT = WIDTH // BLOCK_SIZE, HEIGHT // BLOCK_SIZE - 2
-FONT = pygame.font.SysFont(None, 36)
 
-# Cores disponíveis para os blocos
-COLORS = ["blue", "green", "pink", "red", "cyan", "yellow", "magenta", "orange", "purple"]
+# Configurações principais
+SCREEN_WIDTH, SCREEN_HEIGHT = 1000, 600
+GRID_SIZE = 13
+BLOCK_SIZE = 60
+COLORS = {
+    "Azul": (0, 0, 255),
+    "Ciano": (0, 255, 255),
+    "Magenta": (255, 0, 255),
+    "Amarelo": (255, 255, 0),
+    "Laranja": (255, 165, 0),
+    "Vermelho": (255, 0, 0),
+    "Roxo": (128, 0, 128),
+    "Verde": (0, 255, 0),
+}
+HIGH_SCORE_FILE = "high_score.json"
 
-# Tela do jogo e configurações de pontuação
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Puzzle de Blocos")
-clock = pygame.time.Clock()
-score = 0
-game_over = False
-high_score = 0
+# Funções auxiliares
+def carregar_high_score():
+    if os.path.exists(HIGH_SCORE_FILE):
+        with open(HIGH_SCORE_FILE, "r") as file:
+            data = json.load(file)
+            return data.get("high_score", 0)
+    else:
+        return 0
 
-# Caminho do arquivo para armazenar o high score
-high_score_file = "high_score.json"
+def salvar_high_score(score):
+    with open(HIGH_SCORE_FILE, "w") as file:
+        json.dump({"high_score": score}, file)
 
-# Função para carregar o highscore do arquivo JSON
-def load_high_score():
-    global high_score
-    try:
-        with open(high_score_file, "r") as f:
-            data = json.load(f)
-            high_score = data.get("high_score", 0)
-    except (FileNotFoundError, json.JSONDecodeError):
-        high_score = 0
+def gerar_grade():
+    return [[random.choice(list(COLORS.keys())) for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
 
-# Função para salvar o highscore no arquivo JSON
-def save_high_score():
-    global high_score
-    with open(high_score_file, "w") as f:
-        json.dump({"high_score": high_score}, f)
-
-# Função para gerar uma grade de blocos com cores aleatórias
-def create_grid():
-    grid = []
-    for y in range(GRID_HEIGHT):
-        row = []
-        for x in range(GRID_WIDTH):
-            color = random.choice(COLORS)
-            row.append(color)
-        grid.append(row)
-    return grid
-
-# Função para desenhar a grade na tela
-def draw_grid(grid):
+def desenhar_grade(screen, grid):
     for y, row in enumerate(grid):
-        for x, color in enumerate(row):
-            if color:
-                pygame.draw.rect(screen, pygame.Color(color), (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE))
-                pygame.draw.rect(screen, pygame.Color("black"), (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 1)
+        for x, color_name in enumerate(row):
+            color = COLORS[color_name]
+            pygame.draw.rect(screen, color, (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE))
+            pygame.draw.rect(screen, (0, 0, 0), (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 1)
 
-# Função para encontrar blocos adjacentes da mesma cor
-def get_adjacent_blocks(x, y, color, grid, visited=None):
-    if visited is None:
-        visited = set()
-    if (x, y) in visited or x < 0 or y < 0 or x >= GRID_WIDTH or y >= GRID_HEIGHT or grid[y][x] != color:
-        return visited
-    visited.add((x, y))
-    get_adjacent_blocks(x + 1, y, color, grid, visited)
-    get_adjacent_blocks(x - 1, y, color, grid, visited)
-    get_adjacent_blocks(x, y + 1, color, grid, visited)
-    get_adjacent_blocks(x, y - 1, color, grid, visited)
-    return visited
+def encontrar_combinacoes(grid):
+    combinacoes = []
+    # Horizontal
+    for y in range(GRID_SIZE):
+        count = 1
+        for x in range(1, GRID_SIZE):
+            if grid[y][x] == grid[y][x - 1]:
+                count += 1
+            else:
+                if count >= 3:
+                    combinacoes.append([(y, x - i - 1) for i in range(count)])
+                count = 1
+        if count >= 3:
+            combinacoes.append([(y, GRID_SIZE - i - 1) for i in range(count)])
+    # Vertical
+    for x in range(GRID_SIZE):
+        count = 1
+        for y in range(1, GRID_SIZE):
+            if grid[y][x] == grid[y - 1][x]:
+                count += 1
+            else:
+                if count >= 3:
+                    combinacoes.append([(y - i - 1, x) for i in range(count)])
+                count = 1
+        if count >= 3:
+            combinacoes.append([(GRID_SIZE - i - 1, x) for i in range(count)])
+    return combinacoes
 
-# Função para remover blocos combinados e marcar pontuação
-def remove_blocks(blocks, grid):
-    global score
-    if len(blocks) >= 2:
-        score += len(blocks)
-        for x, y in blocks:
+def remover_combinacoes(grid, combinacoes):
+    for combinacao in combinacoes:
+        for y, x in combinacao:
             grid[y][x] = None
+    for x in range(GRID_SIZE):
+        coluna = [grid[y][x] for y in range(GRID_SIZE) if grid[y][x] is not None]
+        coluna = [None] * (GRID_SIZE - len(coluna)) + coluna
+        for y in range(GRID_SIZE):
+            grid[y][x] = coluna[y]
 
-# Função para aplicar gravidade na grade (blocos caem para baixo)
-def apply_gravity(grid):
-    for x in range(GRID_WIDTH):
-        column = [grid[y][x] for y in range(GRID_HEIGHT) if grid[y][x] is not None]
-        for y in range(GRID_HEIGHT - len(column)):
-            grid[y][x] = None
-        for y, color in enumerate(column):
-            grid[GRID_HEIGHT - len(column) + y][x] = color
+def trocar_blocos(grid, pos1, pos2):
+    y1, x1 = pos1
+    y2, x2 = pos2
+    grid[y1][x1], grid[y2][x2] = grid[y2][x2], grid[y1][x1]
 
-# Função para verificar se todos os blocos foram eliminados
-def check_grid_empty(grid):
-    for row in grid:
-        if any(row):
-            return False
-    return True
+def posicao_clicada(mouse_pos):
+    x, y = mouse_pos
+    return y // BLOCK_SIZE, x // BLOCK_SIZE
 
-# Função para verificar se há movimentos válidos disponíveis
-def check_possible_moves(grid):
-    for y in range(GRID_HEIGHT):
-        for x in range(GRID_WIDTH):
-            color = grid[y][x]
-            if color:
-                # Checa movimentos adjacentes para combinações
-                if x + 1 < GRID_WIDTH and grid[y][x + 1] == color:
-                    return True
-                if y + 1 < GRID_HEIGHT and grid[y + 1][x] == color:
-                    return True
-    return False
+# Configuração inicial do jogo
+# Atualizar a altura da tela
+SCREEN_HEIGHT = GRID_SIZE * BLOCK_SIZE + 100  # Incremento para acomodar os textos
+screen = pygame.display.set_mode((GRID_SIZE * BLOCK_SIZE, SCREEN_HEIGHT))
+pygame.display.set_caption("Block Puzzle")
+clock = pygame.time.Clock()
+font = pygame.font.Font(None, 36)
 
-# Função principal do jogo
-def main():
-    global score, high_score, game_over
-    grid = create_grid()
-    dragging = False
-    selected_block = None
-    load_high_score()  # Carrega o high score ao iniciar o jogo
+# Estado do jogo
+grade = gerar_grade()
+pontos = 0
+pontos_totais = 0
+nivel = 1
+tempo_restante = 150
+ultimo_tempo = time.time()
+high_score = carregar_high_score()
+selecionado = None
 
-    while True:
-        screen.fill((255, 255, 255))
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                save_high_score()  # Salva o high score ao sair do jogo
-                pygame.quit()
-                sys.exit()
-            elif event.type == pygame.MOUSEBUTTONDOWN and not game_over:
-                mx, my = pygame.mouse.get_pos()
-                bx, by = mx // BLOCK_SIZE, my // BLOCK_SIZE
-                if bx < GRID_WIDTH and by < GRID_HEIGHT and grid[by][bx]:
-                    selected_block = (bx, by)
-                    dragging = True
-            elif event.type == pygame.MOUSEBUTTONUP and dragging:
-                if selected_block:
-                    # Pega a posição final do arraste
-                    mx, my = pygame.mouse.get_pos()
-                    ex, ey = mx // BLOCK_SIZE, my // BLOCK_SIZE
-                    bx, by = selected_block
-                    # Se for adjacente ao bloco selecionado, tenta trocar e verificar combinação
-                    if abs(ex - bx) + abs(ey - by) == 1 and ex < GRID_WIDTH and ey < GRID_HEIGHT:
-                        # Realiza a troca temporária
-                        grid[ey][ex], grid[by][bx] = grid[by][bx], grid[ey][ex]
-                        color = grid[ey][ex]
-                        blocks_to_remove = get_adjacent_blocks(ex, ey, color, grid)
-                        if len(blocks_to_remove) >= 2:
-                            remove_blocks(blocks_to_remove, grid)
-                            apply_gravity(grid)
-                            # Verifica se todos os blocos foram eliminados e reinicia a grade
-                            if check_grid_empty(grid):
-                                # Atualiza o high score se a pontuação atual for maior
-                                high_score = max(high_score, score)
-                                score = 0
-                                grid = create_grid()
-                        else:
-                            # Reverte a troca se não houver combinação
-                            grid[ey][ex], grid[by][bx] = grid[by][bx], grid[ey][ex]
-                    dragging = False
-                    selected_block = None
+# Loop principal
+while True:
+    # Eventos
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            pos = posicao_clicada(pygame.mouse.get_pos())
+            if selecionado is None:
+                selecionado = pos
+            else:
+                if abs(selecionado[0] - pos[0]) + abs(selecionado[1] - pos[1]) == 1:  # Checar se são adjacentes
+                    trocar_blocos(grade, selecionado, pos)
+                    if not encontrar_combinacoes(grade):  # Reverter se não houver combinações
+                        trocar_blocos(grade, selecionado, pos)
+                    else:
+                        selecionado = None
+                else:
+                    selecionado = pos
 
-                    # Verifica se o jogo terminou
-                    if not check_possible_moves(grid):
-                        # Atualiza o high score antes de finalizar o jogo
-                        high_score = max(high_score, score)
-                        game_over = True
+    # Atualizar tempo
+    tempo_atual = time.time()
+    tempo_restante -= tempo_atual - ultimo_tempo
+    ultimo_tempo = tempo_atual
 
-        # Desenha a grade e pontuação
-        draw_grid(grid)
-        score_text = FONT.render(f"Score: {score}", True, (0, 0, 0))
-        high_score_text = FONT.render(f"High Score: {high_score}", True, (0, 0, 0))
-        screen.blit(score_text, (10, HEIGHT - 70))
-        screen.blit(high_score_text, (10, HEIGHT - 40))
+    # Encontrar e remover combinações
+    combinacoes = encontrar_combinacoes(grade)
+    if combinacoes:
+        pontos += sum(len(c) for c in combinacoes)
+        pontos_totais += sum(len(c) for c in combinacoes)
+        remover_combinacoes(grade, combinacoes)
+        grade = [[random.choice(list(COLORS.keys())) if cell is None else cell for cell in row] for row in grade]
 
-        # Exibe mensagem de fim de jogo se não houver mais movimentos
-        if game_over:
-            game_over_text = FONT.render("Fim de Jogo! Sem movimentos possíveis.", True, (255, 0, 0))
-            screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2))
-
+    # Verificar condições de vitória ou derrota
+    if pontos >= 100:  # Passar para o próximo nível
+        nivel += 1
+        pontos = 0
+        tempo_restante = 150
+        grade = gerar_grade()
+    elif tempo_restante <= 0:  # Fim de jogo
+        if pontos_totais > high_score:
+            high_score = pontos_totais
+            salvar_high_score(high_score)
+        screen.fill((0, 0, 0))
+        texto_game_over = font.render("GAME OVER", True, (255, 255, 255))
+        screen.blit(texto_game_over, (SCREEN_WIDTH // 2 - texto_game_over.get_width() // 0.53, SCREEN_HEIGHT // 2 - 20))
+        texto_high_score = font.render(f"High Score: {high_score}", True, (255, 255, 255))
+        screen.blit(texto_high_score, (SCREEN_WIDTH // 2 - texto_high_score.get_width() // 0.60, SCREEN_HEIGHT // 2 + 20))
         pygame.display.flip()
-        clock.tick(60)
+        pygame.time.wait(3000)
+        pygame.quit()
+        sys.exit()
 
-if __name__ == "__main__":
-    main()
+    # Renderizar
+    screen.fill((0, 0, 0))
+    desenhar_grade(screen, grade)
+
+    # Renderizar textos
+    texto_pontos = font.render(f"Pontos: {pontos}", True, (255, 255, 255))
+    texto_nivel = font.render(f"Nível: {nivel}", True, (255, 255, 255))
+    texto_tempo = font.render(f"Tempo: {int(tempo_restante)}", True, (255, 255, 255))
+    texto_pontos_totais = font.render(f"Pontos Totais: {pontos_totais}", True, (255, 255, 255))
+    texto_high_score = font.render(f"High Score: {high_score}", True, (255, 255, 255))
+
+    # Primeira linha de informações (topo)
+    screen.blit(texto_pontos, (10, GRID_SIZE * BLOCK_SIZE + 10))
+    screen.blit(texto_nivel, (350, GRID_SIZE * BLOCK_SIZE + 10))
+    screen.blit(texto_tempo, (625, GRID_SIZE * BLOCK_SIZE + 10))
+
+    # Segunda linha de informações (abaixo)
+    screen.blit(texto_pontos_totais, (10, GRID_SIZE * BLOCK_SIZE + 40))
+    screen.blit(texto_high_score, (500, GRID_SIZE * BLOCK_SIZE + 40))
+
+    pygame.display.flip()
+    clock.tick(30)
